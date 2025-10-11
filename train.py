@@ -15,7 +15,7 @@ def main(args):
     
     # 1. --- Load Model and Tokenizer ---
     model_name = "mistralai/Mistral-7B-v0.1"
-    print(f"Loading base model: {model_name}")
+    print(f"--- [DEBUG] Loading base model: {model_name} ---")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
@@ -24,47 +24,62 @@ def main(args):
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    print("Model and tokenizer loaded.")
+    print("--- [DEBUG] Model and tokenizer loaded. ---")
 
-    # 2. --- Load and Prepare the Dataset (CORRECTED & SMARTER) ---
+    # 2. --- Load and Prepare the Dataset ---
     training_data_path = os.path.join(args.training_dir, "dataset_filtered.jsonl")
-    print(f"Loading dataset from: {training_data_path}")
+    print(f"--- [DEBUG] Loading dataset from: {training_data_path} ---")
 
-    # Load the raw JSONL dataset
-    raw_dataset = load_dataset('json', data_files=training_data_path, split='train')
+    try:
+        raw_dataset = load_dataset('json', data_files=training_data_path, split='train')
+        print(f"--- [DEBUG] Successfully loaded raw dataset with {len(raw_dataset)} rows. ---")
+    except Exception as e:
+        print(f"--- [FATAL ERROR] Failed to load dataset. Error: {e} ---")
+        return # Exit if we can't even load the file
 
-    # This new function handles the complex data structure
+    # This function will now print what it finds
     def preprocess_and_tokenize(examples):
         texts_to_tokenize = []
-        # The 'datasets' library processes data in batches. We loop through the batch.
         for i in range(len(examples['content'])):
-            # Start with the main content
             text = examples['content'][i]
             
-            # If main content is empty, try to find text in the embed
             if not text:
                 embeds = examples['embeds'][i]
-                # Check if embeds list is not empty
                 if embeds and isinstance(embeds, list) and len(embeds) > 0:
-                    # Check for a 'description' in the first embed
                     description = embeds[0].get('description')
                     if description:
                         text = description
             
-            texts_to_tokenize.append(text if text else "")
+            # This is our new debug log!
+            if i < 20: # Only print the first 20 for brevity
+                # Truncate the text to 150 characters for clean logs
+                log_text = (text[:150] + '...') if text and len(text) > 150 else text
+                print(f"--- [DEBUG] Row {i} | Extracted Text: '{log_text}' ---")
 
-        # Tokenize the extracted texts
+            texts_to_tokenize.append(text if text else "")
+        
         return tokenizer(texts_to_tokenize, truncation=True, max_length=128)
 
-    # Apply the new function to the entire dataset
     tokenized_dataset = raw_dataset.map(
         preprocess_and_tokenize, 
         batched=True, 
         remove_columns=raw_dataset.column_names
     )
     
+    print(f"--- [DEBUG] Tokenized dataset now has {len(tokenized_dataset)} rows. ---")
+    
+    # Exit gracefully if the dataset is empty after processing
+    if len(tokenized_dataset) == 0:
+        print("--- [FATAL ERROR] Dataset is empty after preprocessing. No data to train on. Exiting. ---")
+        # We must save a dummy file, or SageMaker will fail the job before we can see the logs
+        dummy_file_path = os.path.join(args.model_dir, "training_failed.log")
+        with open(dummy_file_path, "w") as f:
+            f.write("Dataset was empty. See CloudWatch logs for details.")
+        print("--- [DEBUG] Dummy file created. ---")
+        return
+
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
-    print("Dataset prepared and tokenized.")
+    print("--- [DEBUG] Dataset prepared and tokenized. ---")
 
     # 3. --- Define Training Arguments ---
     training_args = TrainingArguments(
@@ -86,14 +101,14 @@ def main(args):
     )
     
     # 5. --- Start Training ---
-    print("Starting model training...")
+    print("--- [DEBUG] Starting model training... ---")
     trainer.train()
-    print("Training complete.")
+    print("--- [DEBUG] Training complete. ---")
     
     # 6. --- Save the Final Model ---
-    print(f"Saving final model artifacts to {args.model_dir}")
+    print(f"--- [DEBUG] Saving final model artifacts to {args.model_dir} ---")
     trainer.save_model(args.model_dir)
-    print("Model saving complete.")
+    print("--- [DEBUG] Model saving complete. ---")
 
 
 if __name__ == "__main__":
