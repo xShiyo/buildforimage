@@ -39,8 +39,8 @@ def main(args):
     # Use load_dataset for .jsonl files
     raw_dataset = load_dataset('json', data_files=training_data_path, split='train')
 
-    # Assuming the text is in a column named "content". If not, change this.
-    # We also tokenize the dataset.
+    # IMPORTANT: Assumes the text is in a column named "content". 
+    # If your JSONL key is different (e.g., "text"), change it here.
     def tokenize_function(examples):
         return tokenizer(examples["content"], truncation=True, max_length=128)
 
@@ -90,10 +90,6 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=4)
     
     parser.add_argument("--model_dir", type=str, default=os.environ.get("SM_MODEL_DIR"))
-    parser.add_argument("--training_dir", type=str, default=os.environ.get("SM_CHANNEL_TRAINING"))
-    
-    args = parser.parse_args()
-    main(args)
     parser.add_argument("--training_dir", type=str, default=os.environ.get("SM_CHANNEL_TRAINING"))
     
     args = parser.parse_args()
