@@ -1,71 +1,104 @@
-import argparse
 import os
-import json
-import pandas as pd
+import argparse
 import torch
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    Trainer,
+    TrainingArguments,
+    TextDataset,
+    DataCollatorForLanguageModeling,
+)
 
-# Your other imports go here
-# from your_model_file import YourModel
-# from your_dataset_file import YourDataset
-
-def _parse_args():
-    """Parse hyperparameters and data locations passed by SageMaker."""
-    parser = argparse.ArgumentParser()
-
-    # Hyperparameters sent by the Estimator
-    parser.add_argument("--epochs", type=int, default=3)
-    parser.add_argument("--batch_size", type=int, default=64)
-    # Add any other hyperparameters you need
-    # parser.add_argument("--learning-rate", type=float, default=0.001)
-
-    # SageMaker environment variables for data and model directories
-    # These are automatically set by the SageMaker environment
-    parser.add_argument("--model-dir", type=str, default=os.environ.get("SM_MODEL_DIR"))
-    parser.add_argument("--training", type=str, default=os.environ.get("SM_CHANNEL_TRAINING"))
+def main(args):
+    """Main training function."""
     
-    return parser.parse_known_args()
+    # 1. --- Load Model and Tokenizer ---
+    # This is where you specify the exact model you want to fine-tune.
+    model_name = "mistralai/Mistral-7B-v0.1"
+    
+    print(f"Loading base model: {model_name}")
+    
+    # Load the pre-trained model and tokenizer from Hugging Face.
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        device_map="auto",  # Automatically use the available GPU.
+        torch_dtype=torch.bfloat16,  # Use bfloat16 for memory efficiency.
+    )
+    
+    # The Mistral model doesn't have a default padding token.
+    # We'll set it to the End-Of-Sentence token for training.
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        
+    print("Model and tokenizer loaded successfully.")
+
+    # 2. --- Load and Prepare the Dataset ---
+    # SageMaker copies your S3 data to the path specified by the 'training' channel.
+    training_data_file = "dataset_filtered.jsonl"
+    training_data_path = os.path.join(args.training_dir, training_data_file)
+    
+    print(f"Loading and preparing dataset from: {training_data_path}")
+
+    # The TextDataset class is a simple way to load a text file for language modeling.
+    dataset = TextDataset(
+        tokenizer=tokenizer,
+        file_path=training_data_path,
+        block_size=128,  # This chunks the text into blocks of 128 tokens. Adjust if needed.
+    )
+    
+    # This collator prepares batches of data for language modeling.
+    data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer, 
+        mlm=False,  # Causal language modeling, not masked language modeling.
+    )
+    
+    print("Dataset prepared.")
+
+    # 3. --- Define Training Arguments ---
+    # These arguments control the training process.
+    training_args = TrainingArguments(
+        output_dir=args.model_dir,  # **Crucial:** SageMaker requires the output to be here.
+        num_train_epochs=args.epochs,
+        per_device_train_batch_size=args.batch_size,
+        save_strategy="no",  # Don't save checkpoints; only save the final model.
+        logging_steps=100,
+        fp16=False,  # We are using bfloat16 instead.
+        bf16=True,   # Enable bfloat16 for better performance on modern GPUs.
+    )
+    
+    # 4. --- Initialize the Trainer ---
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        data_collator=data_collator,
+        train_dataset=dataset,
+    )
+    
+    # 5. --- Start Training ---
+    print("Starting model training...")
+    trainer.train()
+    print("Training complete.")
+    
+    # 6. --- Save the Final Model ---
+    # The Trainer saves the model, tokenizer, and config to the specified output directory.
+    print(f"Saving final model artifacts to {args.model_dir}")
+    trainer.save_model(args.model_dir)
+    print("Model saving complete.")
 
 
 if __name__ == "__main__":
-    args, _ = _parse_args()
-
-    print("--- Starting Training ---")
-    print(f"Epochs: {args.epochs}")
-    print(f"Batch Size: {args.batch_size}")
-    print(f"Model output directory: {args.model_dir}")
-    print(f"Training data directory: {args.training}")
-
-    # --- 1. Load your dataset ---
-    # The data from your S3 bucket (specified in .fit()) is copied here
-    training_data_path = os.path.join(args.training, "your_training_file.csv") # e.g., 'data.csv'
-    print(f"Loading data from {training_data_path}")
-    # TODO: Replace with your actual data loading logic
-    # df = pd.read_csv(training_data_path)
-    # dataset = YourDataset(df)
-    # dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size)
+    # This block parses arguments passed by the SageMaker Estimator in your notebook.
+    parser = argparse.ArgumentParser()
     
-
-    # --- 2. Define your model, optimizer, etc. ---
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # TODO: Instantiate your model
-    # model = YourModel().to(device)
-    # optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+    # Hyperparameters from the Estimator
+    parser.add_argument("--epochs", type=int, default=1)
+    parser.add_argument("--batch_size", type=int, default=4)
     
-
-    # --- 3. Your training loop ---
-    # TODO: Add your training logic here
-    # for epoch in range(args.epochs):
-    #     print(f"Epoch {epoch+1}/{args.epochs}")
-    #     for batch in dataloader:
-    #         # Your training step
-    #         pass
-
-
-    # --- 4. Save the final model ---
-    # SageMaker requires the model artifacts to be saved in the model_dir
-    print("Training complete. Saving model.")
-    model_save_path = os.path.join(args.model_dir, "model.pth")
-    # TODO: Uncomment and use your model variable
-    # torch.save(model.state_dict(), model_save_path)
+    # SageMaker's environment variables for file paths
+    parser.add_argument("--model_dir", type=str, default=os.environ.get("SM_MODEL_DIR"))
+    parser.add_argument("--training_dir", type=str, default=os.environ.get("SM_CHANNEL_TRAINING"))
     
-    print(f"Model saved to {model_save_path}")
+    args = parser.parse_args()
+    main(args)
