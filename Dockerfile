@@ -1,5 +1,5 @@
 # Start from a base image with PyTorch and CUDA support
-FROM pytorch/pytorch:1.13.1-cuda11.6-cudnn8-runtime
+FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
 
 # Set the working directory inside the container
 WORKDIR /app
@@ -9,9 +9,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # --- SageMaker Specific Instructions ---
-
-# Set an environment variable that tells SageMaker which script to run
-ENV SAGEMAKER_PROGRAM train.py
-
-# Copy your training script into the location SageMaker expects
+# Copy the training script
 COPY train.py /opt/ml/code/train.py
+
+# Define the entry point for the container
+ENV SAGEMAKER_PROGRAM train.py
