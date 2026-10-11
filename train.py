@@ -13,7 +13,7 @@ from transformers import (
 def main(args):
     """Main training function."""
     
-    # 1. --- Load Model and Tokenizer ---
+    # Load model and tokenizer
     model_name = "mistralai/Mistral-7B-v0.1"
     print(f"--- [DEBUG] Loading base model: {model_name} ---")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -26,7 +26,7 @@ def main(args):
         tokenizer.pad_token = tokenizer.eos_token
     print("--- [DEBUG] Model and tokenizer loaded. ---")
 
-    # 2. --- Load and Prepare the Dataset ---
+    # dataset load 
     training_data_path = os.path.join(args.training_dir, "dataset_filtered.jsonl")
     print(f"--- [DEBUG] Loading dataset from: {training_data_path} ---")
 
@@ -50,7 +50,7 @@ def main(args):
                     if description:
                         text = description
             
-            # This is our new debug log!
+            
             if i < 20: # Only print the first 20 for brevity
                 # Truncate the text to 150 characters for clean logs
                 log_text = (text[:150] + '...') if text and len(text) > 150 else text
@@ -71,7 +71,7 @@ def main(args):
     # Exit gracefully if the dataset is empty after processing
     if len(tokenized_dataset) == 0:
         print("--- [FATAL ERROR] Dataset is empty after preprocessing. No data to train on. Exiting. ---")
-        # We must save a dummy file, or SageMaker will fail the job before we can see the logs
+    
         dummy_file_path = os.path.join(args.model_dir, "training_failed.log")
         with open(dummy_file_path, "w") as f:
             f.write("Dataset was empty. See CloudWatch logs for details.")
@@ -81,7 +81,7 @@ def main(args):
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
     print("--- [DEBUG] Dataset prepared and tokenized. ---")
 
-    # 3. --- Define Training Arguments ---
+    # Define Training Arguments
     training_args = TrainingArguments(
         output_dir=args.model_dir,
         num_train_epochs=args.epochs,
@@ -92,7 +92,7 @@ def main(args):
         bf16=True,
     )
     
-    # 4. --- Initialize the Trainer ---
+    # Initialize the Trainer
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -100,12 +100,12 @@ def main(args):
         train_dataset=tokenized_dataset,
     )
     
-    # 5. --- Start Training ---
+    # Start training
     print("--- [DEBUG] Starting model training... ---")
     trainer.train()
     print("--- [DEBUG] Training complete. ---")
     
-    # 6. --- Save the Final Model ---
+    # Save final model 
     print(f"--- [DEBUG] Saving final model artifacts to {args.model_dir} ---")
     trainer.save_model(args.model_dir)
     print("--- [DEBUG] Model saving complete. ---")
